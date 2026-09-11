@@ -1,1 +1,215 @@
-# wia-
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>간단 운행일지 (차량번호 추가형)</title>
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; max-width: 700px; margin: 20px auto; padding: 0 15px; background: #f5f6f7; color: #333; }
+h1 { text-align: center; color: #1e88e5; }
+.card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+.form-group { margin-bottom: 15px; }
+.form-row { display: flex; gap: 10px; margin-bottom: 15px; }
+.form-row .form-group { flex: 1; margin-bottom: 0; }
+label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
+input, select { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+button { width: 100%; padding: 12px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; font-weight: bold; }
+.btn-submit { background: #1e88e5; color: white; margin-bottom: 10px; }
+.btn-download { background: #4caf50; color: white; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; }
+th, td { border: 1px solid #ddd; padding: 10px; text-align: center; font-size: 13px; }
+th { background: #eee; }
+.delete-btn { background: #e53935; color: white; padding: 4px 8px; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; }
+.highlight { font-weight: bold; color: #1e88e5; }
+</style>
+</head>
+<body>
+ 
+<h1>wia의왕 간단 운행일지</h1>
+ 
+<!-- 입력 폼 -->
+<div class="card">
+<form id="logForm">
+<div class="form-row">
+<div class="form-group">
+<label>날짜</label>
+<input type="date" id="date" required>
+</div>
+<!-- 차량번호 입력 필드 추가 -->
+<div class="form-group">
+<label>차량번호</label>
+<input type="text" id="carNumber" placeholder="예: 12가 3456" required>
+</div>
+</div>
+<div class="form-group">
+<label>출발지 -> 도착지</label>
+<input type="text" id="route" placeholder="예: 회사 -> 강남역" required>
+</div>
+ 
+<!-- 주행 전/후 계기판 거리 -->
+<div class="form-row">
+<div class="form-group">
+<label>주행 전 계기판 (km)</label>
+<input type="number" id="startOdo" placeholder="예: 52400" required>
+</div>
+<div class="form-group">
+<label>주행 후 계기판 (km)</label>
+<input type="number" id="endOdo" placeholder="예: 52415" required>
+</div>
+</div>
+ 
+<div class="form-group">
+<label>운행 목적</label>
+<select id="purpose">
+<option value="출퇴근">출퇴근</option>
+<option value="업무용">일반 업무</option>
+<option value="개인용">개인 볼일</option>
+</select>
+</div>
+<button type="submit" class="btn-submit">기록하기</button>
+</form>
+<button id="downloadCsv" class="btn-download">엑셀(CSV) 다운로드</button>
+</div>
+ 
+<!-- 기록 테이블 -->
+<div class="card" style="overflow-x: auto;">
+<h3>운행 기록 목록</h3>
+<table>
+<thead>
+<tr>
+<th>날짜</th>
+<th>차량번호</th>
+<th>경로</th>
+<th>주행 전 (km)</th>
+<th>주행 후 (km)</th>
+<th>주행 거리</th>
+<th>목적</th>
+<th>삭제</th>
+</tr>
+</thead>
+<tbody id="logTableBody">
+<!-- 데이터 출력 영역 -->
+</tbody>
+</table>
+</div>
+ 
+<script>
+// 오늘 날짜 기본 설정
+document.getElementById('date').value = new Date().toISOString().substring(0, 10);
+ 
+// 로컬 스토리지 데이터 가져오기
+let logs = JSON.parse(localStorage.getItem('drivingLogs')) || [];
+ 
+// 입력 폼에 직전 주행 데이터 자동 연동
+function setNextInputs() {
+if (logs.length > 0) {
+const lastLog = logs[logs.length - 1];
+// 마지막에 쓴 차량번호 유지
+document.getElementById('carNumber').value = lastLog.carNumber || '';
+// 입력된 차량번호와 일치하는 마지막 기록의 최종 계기판 거리를 찾아 자동 세팅
+updateStartOdoByCar();
+}
+}
+ 
+// 차량번호 변경 시 해당 차량의 마지막 계기판 거리를 자동으로 찾아주는 함수
+function updateStartOdoByCar() {
+const currentCar = document.getElementById('carNumber').value.trim();
+if(!currentCar) return;
+ 
+// 해당 차량번호로 등록된 가장 최신 기록 찾기 (역순 검색)
+const matchedLog = logs.slice().reverse().find(log => log.carNumber === currentCar);
+if (matchedLog) {
+document.getElementById('startOdo').value = matchedLog.endOdo;
+} else {
+document.getElementById('startOdo').value = '';
+}
+}
+ 
+// 차량번호 입력창에서 포커스가 나갈 때 계기판 연동 실행
+document.getElementById('carNumber').addEventListener('blur', updateStartOdoByCar);
+ 
+// 화면에 테이블 그리기 함수
+function renderLogs() {
+const tbody = document.getElementById('logTableBody');
+tbody.innerHTML = '';
+// 최신 기록이 위로 오도록 역순 출력
+logs.slice().reverse().forEach((log, index) => {
+const actualIndex = logs.length - 1 - index; // 원본 배열 인덱스
+const tripDistance = (log.endOdo - log.startOdo).toFixed(1); // 주행거리 계산
+const row = `<tr>
+<td>${log.date}</td>
+<td style="font-weight: 500;">${log.carNumber || '-'}</td>
+<td>${log.route}</td>
+<td>${Number(log.startOdo).toLocaleString()}</td>
+<td>${Number(log.endOdo).toLocaleString()}</td>
+<td class="highlight">${Number(tripDistance).toLocaleString()} km</td>
+<td>${log.purpose}</td>
+<td><button class="delete-btn" onclick="deleteLog(${actualIndex})">삭제</button></td>
+</tr>`;
+tbody.innerHTML += row;
+});
+ 
+setNextInputs();
+}
+ 
+// 데이터 저장하기
+document.getElementById('logForm').addEventListener('submit', function(e) {
+e.preventDefault();
+const startOdo = parseFloat(document.getElementById('startOdo').value);
+const endOdo = parseFloat(document.getElementById('endOdo').value);
+ 
+// 유효성 검사
+if (endOdo < startOdo) {
+alert("주행 후 계기판 거리는 주행 전보다 작을 수 없습니다!");
+return;
+}
+const newLog = {
+date: document.getElementById('date').value,
+carNumber: document.getElementById('carNumber').value.trim(),
+route: document.getElementById('route').value,
+startOdo: startOdo,
+endOdo: endOdo,
+purpose: document.getElementById('purpose').value
+};
+ 
+logs.push(newLog);
+localStorage.setItem('drivingLogs', JSON.stringify(logs));
+renderLogs();
+// 입력창 초기화 (날짜, 차량번호는 연속 입력을 위해 유지)
+document.getElementById('route').value = '';
+document.getElementById('endOdo').value = '';
+});
+ 
+// 데이터 삭제하기
+function deleteLog(index) {
+if(confirm("이 기록을 삭제하시겠습니까?")) {
+logs.splice(index, 1);
+localStorage.setItem('drivingLogs', JSON.stringify(logs));
+renderLogs();
+}
+}
+ 
+// CSV 파일로 내보내기 (엑셀 호환)
+document.getElementById('downloadCsv').addEventListener('click', function() {
+if(logs.length === 0) return alert("다운로드할 데이터가 없습니다.");
+let csvContent = "\uFEFF날짜,차량번호,경로,주행 전 계기판(km),주행 후 계기판(km),순 주행거리(km),운행목적\n";
+logs.forEach(log => {
+const tripDistance = (log.endOdo - log.startOdo).toFixed(1);
+csvContent += `${log.date},${log.carNumber || ''},${log.route},${log.startOdo},${log.endOdo},${tripDistance},${log.purpose}\n`;
+});
+ 
+const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+const url = URL.createObjectURL(blob);
+const link = document.createElement("a");
+link.setAttribute("href", url);
+link.setAttribute("download", `운행일지_${new Date().toISOString().substring(0,10)}.csv`);
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
+});
+ 
+// 초기 실행
+renderLogs();
+</script>
+</body>
+</html>
